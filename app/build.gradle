@@ -4,11 +4,11 @@ android {
     compileSdkVersion 30
 
     defaultConfig {
-        applicationId "com.harmonia.ai.language.v1"
+        applicationId "com.harmonia.ai.realai.v1"
         minSdkVersion 23
         targetSdkVersion 30
-        versionCode 6
-        versionName "0.1.5-auto-language"
+        versionCode 7
+        versionName "0.2.0-real-ai"
     }
 
     buildTypes {
