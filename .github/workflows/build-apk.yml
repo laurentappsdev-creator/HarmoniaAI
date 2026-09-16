@@ -21,9 +21,10 @@ jobs:
 
       - name: Install Android SDK 30
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-30" "build-tools;30.0.3"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --version
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-30" "build-tools;30.0.3"
 
       - name: Switch to Java 11 for Gradle
         uses: actions/setup-java@v5
