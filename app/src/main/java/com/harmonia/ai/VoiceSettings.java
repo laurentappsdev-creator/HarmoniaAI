@@ -36,7 +36,7 @@ public final class VoiceSettings {
     }
 
     public static Preset sensual() {
-        return new Preset(0.88f,0.84f,0.90f);
+        return new Preset(0.88f,0.84f,0.96f);
     }
 
     public static int volumeToProgress(float volume) {
