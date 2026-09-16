@@ -83,7 +83,21 @@ public class MainActivity extends Activity {
 
     private void showDiscover() {
         clear();
-        Profile p = profiles[index % profiles.length];
+
+        int eligibleIndex=findEligibleIndex(index);
+        if(eligibleIndex<0) {
+            content.addView(Ui.text(this,"Aucun profil compatible pour le moment",22,Ui.TEXT,true));
+            TextView empty=Ui.text(this,
+                    "Tous les profils disponibles sont exclus par vos critères indispensables. Modifiez vos préférences pour élargir la recherche.",
+                    14,Ui.MUTED,false);
+            Ui.padding(empty,this,0,8,0,0);
+            content.addView(empty);
+            return;
+        }
+
+        index=eligibleIndex;
+        Profile p=profiles[index];
+        MatchResult result=resultFor(p);
 
         TextView title = Ui.text(this, "Sélection IA du jour", 22, Ui.TEXT, true);
         content.addView(title);
@@ -106,7 +120,7 @@ public class MainActivity extends Activity {
         card.addView(name);
         card.addView(Ui.text(this, p.city, 14, Ui.MUTED, false));
 
-        TextView score = Ui.text(this, p.score() + "% compatible · " + MatchEngine.verdict(p.score()), 15, Ui.MINT, true);
+        TextView score = Ui.text(this, result.score + "% compatible · " + MatchEngine.verdict(result.score), 15, Ui.MINT, true);
         Ui.padding(score,this,0,12,0,12);
         card.addView(score);
 
@@ -125,7 +139,7 @@ public class MainActivity extends Activity {
         detail.setBackground(Ui.stroke(Ui.SURFACE2, Ui.VIOLET, 1, 18, this));
         detail.setOnClickListener(v -> {
             Intent i = new Intent(this, CompatibilityActivity.class);
-            i.putExtra("idx", index % profiles.length);
+            i.putExtra("idx", index);
             startActivity(i);
         });
         card.addView(detail, new LinearLayout.LayoutParams(-1, Ui.dp(this,52)));
@@ -136,7 +150,7 @@ public class MainActivity extends Activity {
         Ui.padding(actions,this,0,16,0,0);
 
         Button pass = actionButton("Passer", Ui.SURFACE2);
-        pass.setOnClickListener(v -> nextProfile());
+        pass.setOnClickListener(v -> passProfile(p));
         Button like = actionButton("♥ J’aime", Ui.PINK);
         like.setOnClickListener(v -> likeProfile(p));
         actions.addView(pass, new LinearLayout.LayoutParams(0,Ui.dp(this,58),1));
@@ -166,11 +180,19 @@ public class MainActivity extends Activity {
     }
 
     private void nextProfile() {
-        index = (index + 1) % profiles.length;
+        index=(index+1)%profiles.length;
         showDiscover();
     }
 
+    private void passProfile(Profile p) {
+        PreferenceLearner.record(
+                getSharedPreferences("harmonia_learning",MODE_PRIVATE),p,false);
+        nextProfile();
+    }
+
     private void likeProfile(Profile p) {
+        PreferenceLearner.record(
+                getSharedPreferences("harmonia_learning",MODE_PRIVATE),p,true);
         new AlertDialog.Builder(this)
                 .setTitle("Like enregistré")
                 .setMessage("Votre préférence aide Harmonia AI à mieux comprendre les profils qui vous correspondent.\n\nDémo : " + p.name + " a été ajoutée à vos likes.")
@@ -186,35 +208,58 @@ public class MainActivity extends Activity {
         Ui.padding(t,this,0,5,0,14);
         content.addView(t);
 
-        for (int i=0;i<profiles.length;i++) {
-            Profile p = profiles[i];
-            if (p.score()<85) continue;
+        int[] order=new int[profiles.length];
+        for(int i=0;i<profiles.length;i++) order[i]=i;
 
-            LinearLayout row = new LinearLayout(this);
+        for(int i=0;i<order.length;i++) {
+            for(int j=i+1;j<order.length;j++) {
+                MatchResult a=resultFor(profiles[order[i]]);
+                MatchResult b=resultFor(profiles[order[j]]);
+                int as=a.eligible?a.score:-1;
+                int bs=b.eligible?b.score:-1;
+                if(bs>as) {
+                    int tmp=order[i];
+                    order[i]=order[j];
+                    order[j]=tmp;
+                }
+            }
+        }
+
+        for(int k=0;k<order.length;k++) {
+            final int pos=order[k];
+            Profile p=profiles[pos];
+            MatchResult result=resultFor(p);
+            if(!result.eligible || result.score<70) continue;
+
+            LinearLayout row=new LinearLayout(this);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setBackground(Ui.rounded(Ui.SURFACE,18,this));
             Ui.padding(row,this,14,14,14,14);
 
-            TextView av = Ui.text(this,p.name.substring(0,1),22,Ui.TEXT,true);
+            TextView av=Ui.text(this,p.name.substring(0,1),22,Ui.TEXT,true);
             av.setGravity(Gravity.CENTER);
             av.setBackground(Ui.rounded(Ui.VIOLET,30,this));
             row.addView(av,new LinearLayout.LayoutParams(Ui.dp(this,56),Ui.dp(this,56)));
 
-            LinearLayout texts = new LinearLayout(this);
+            LinearLayout texts=new LinearLayout(this);
             texts.setOrientation(LinearLayout.VERTICAL);
             Ui.padding(texts,this,12,0,0,0);
             texts.addView(Ui.text(this,p.name+", "+p.age,17,Ui.TEXT,true));
-            texts.addView(Ui.text(this,p.score()+"% · "+p.city,13,Ui.MINT,false));
+            texts.addView(Ui.text(this,result.score+"% · "+p.city,13,Ui.MINT,false));
+            if(!result.reasons().isEmpty()) {
+                TextView reason=Ui.text(this,result.reasons().get(0),12,Ui.MUTED,false);
+                Ui.padding(reason,this,0,3,0,0);
+                texts.addView(reason);
+            }
             row.addView(texts,new LinearLayout.LayoutParams(0,-2,1));
 
-            final int pos=i;
             row.setOnClickListener(v->{
                 Intent in=new Intent(this,CompatibilityActivity.class);
                 in.putExtra("idx",pos);
                 startActivity(in);
             });
 
-            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1,-2);
+            LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,-2);
             rp.bottomMargin=Ui.dp(this,10);
             content.addView(row,rp);
         }
@@ -273,11 +318,14 @@ public class MainActivity extends Activity {
         Ui.padding(aiTitle,this,0,2,0,10);
         content.addView(aiTitle);
 
-        infoCard("Préférences visuelles", "Actives · personnalisées à partir de vos likes et passes");
-        infoCard("Relation recherchée", "Sérieuse");
-        infoCard("Distance maximale", "50 km");
-        infoCard("Centres d’intérêt", "Nature · sorties · animaux · voyages");
-        infoCard("Données sensibles", "Non analysées : origine, santé, religion et autres attributs sensibles");
+        UserPreferences up=currentPreferences();
+        infoCard("Préférences visuelles","Personnalisées · ajustées progressivement à partir de vos likes et passes");
+        infoCard("Relation recherchée",up.relationshipIntent.isEmpty()?"Non définie":"Sérieuse");
+        infoCard("Âge recherché",up.minAge+" à "+up.maxAge+" ans");
+        infoCard("Distance maximale",up.maxDistanceKm+" km");
+        infoCard("Critères éliminatoires",up.rejectSmokers?"Distance · âge · intention · non-fumeur":"Distance · âge · intention");
+        infoCard("Apprentissage IA","Vos likes et passes peuvent ajuster le score de ±6 points maximum");
+        infoCard("Données sensibles","Non analysées : origine, santé, religion et autres attributs sensibles");
     }
 
     private void openPhotoPicker() {
@@ -301,6 +349,26 @@ public class MainActivity extends Activity {
         String saved=PhotoUriState.clean(uri.toString());
         getSharedPreferences("harmonia",MODE_PRIVATE).edit().putString("profile_photo_uri",saved).apply();
         showProfile();
+    }
+
+
+    private UserPreferences currentPreferences() {
+        return UserPreferences.from(getSharedPreferences("harmonia",MODE_PRIVATE));
+    }
+
+    private MatchResult resultFor(Profile p) {
+        SharedPreferences learning=getSharedPreferences("harmonia_learning",MODE_PRIVATE);
+        return MatchEngine.evaluate(
+                p,currentPreferences(),PreferenceLearner.adjustment(learning,p));
+    }
+
+    private int findEligibleIndex(int start) {
+        if(profiles==null || profiles.length==0) return -1;
+        for(int offset=0;offset<profiles.length;offset++) {
+            int candidate=(start+offset)%profiles.length;
+            if(resultFor(profiles[candidate]).eligible) return candidate;
+        }
+        return -1;
     }
 
     private void infoCard(String title,String text) {
