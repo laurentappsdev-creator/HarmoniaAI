@@ -45,8 +45,21 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p = Path("app/src/main/java/com/harmonia/ai/ChatActivity.java")
-          s = p.read_text()
-          p.write_text(s.replace("\\nimport", "\nimport"))
+          s = p.read_text().replace("\\nimport", "\nimport")
+          marker = "    private TextView languageStatus;\n"
+          if "private LinearLayout voicePanel;" not in s:
+              fields = """    private LinearLayout voicePanel;
+    private SeekBar volumeSeek;
+    private SeekBar rateSeek;
+    private SeekBar pitchSeek;
+    private TextView voiceValues;
+    private SharedPreferences voicePrefs;
+    private float voiceVolume=0.88f;
+    private float voiceRate=0.84f;
+    private float voicePitch=0.96f;
+"""
+              s = s.replace(marker, marker + fields)
+          p.write_text(s)
           PY
 
       - name: Run unit tests
