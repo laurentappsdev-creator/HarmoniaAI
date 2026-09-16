@@ -2,6 +2,8 @@ name: Diagnose HarmoniaAI Launch
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   diagnose:
