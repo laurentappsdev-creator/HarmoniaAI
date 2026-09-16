@@ -13,4 +13,15 @@ public class VoiceConversationTest {
         assertFalse(VoiceConversation.hasText(null));
         assertTrue(VoiceConversation.hasText("Trouve-moi Emma"));
     }
+
+    @Test public void extractsLanguageCodeFromDetectedTag() {
+        assertEquals("fr", VoiceConversation.languageCode("fr-FR"));
+        assertEquals("en", VoiceConversation.languageCode("en-US"));
+        assertEquals("de", VoiceConversation.languageCode("DE-de"));
+    }
+
+    @Test public void fallsBackWhenDetectedLanguageIsMissing() {
+        assertEquals("fr", VoiceConversation.languageCode(null));
+        assertEquals("fr", VoiceConversation.languageCode(""));
+    }
 }
