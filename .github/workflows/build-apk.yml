@@ -68,20 +68,20 @@ jobs:
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Prepare named APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk HarmoniaAI_VoiceControl.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk HarmoniaAI_MatchingEngine.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HarmoniaAI-voice-control-apk
-          path: HarmoniaAI_VoiceControl.apk
+          name: HarmoniaAI-matching-engine-apk
+          path: HarmoniaAI_MatchingEngine.apk
           if-no-files-found: error
 
       - name: Publish direct-download release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete harmonia-voice-control-v1 -y --cleanup-tag || true
-          gh release create harmonia-voice-control-v1 HarmoniaAI_VoiceControl.apk \
-            --title "HarmoniaAI Voice Control" \
-            --notes "Version Gemini avec voix naturelle, préréglage sensuel et réglages volume, vitesse et ton."
+          gh release delete harmonia-matching-v1 -y --cleanup-tag || true
+          gh release create harmonia-matching-v1 HarmoniaAI_MatchingEngine.apk \
+            --title "HarmoniaAI Matching Engine" \
+            --notes "Version avec moteur de compatibilité explicable, critères éliminatoires et apprentissage progressif des préférences."
