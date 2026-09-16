@@ -2,8 +2,6 @@ name: Diagnose HarmoniaAI Launch
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
   diagnose:
@@ -43,6 +41,12 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/30.0.3/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/30.0.3/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Java 17 for emulator tools
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
 
       - name: Boot emulator and launch app
         uses: reactivecircus/android-emulator-runner@v2
