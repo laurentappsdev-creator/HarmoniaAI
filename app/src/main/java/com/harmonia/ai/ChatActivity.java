@@ -309,11 +309,16 @@ public class ChatActivity extends Activity {
                 }
             } else {
                 String serverError="";
+                String serverMessage="";
                 try {
-                    serverError=new JSONObject(response).optString("error","");
+                    JSONObject serverJson=new JSONObject(response);
+                    serverError=serverJson.optString("error","");
+                    serverMessage=VoiceConversation.clean(serverJson.optString("message",""));
                 } catch(Exception ignored) {}
                 if ("ai_not_configured".equals(serverError)) {
-                    error="Le serveur Harmonia est prêt, mais la clé OpenAI doit encore être activée dans Supabase.";
+                    error="Le serveur Harmonia est prêt, mais la clé Gemini doit encore être ajoutée dans Supabase.";
+                } else if (VoiceConversation.hasText(serverMessage)) {
+                    error=serverMessage;
                 } else {
                     error="Impossible de joindre l’IA pour le moment. Réessayez.";
                 }
