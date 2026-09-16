@@ -4,14 +4,18 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 public class MainActivity extends Activity {
+    private static final int PHOTO_REQUEST = 2001;
+
     private LinearLayout content;
     private Profile[] profiles;
     private int index = 0;
@@ -161,7 +165,10 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    private void nextProfile() { index = (index + 1) % profiles.length; showDiscover(); }
+    private void nextProfile() {
+        index = (index + 1) % profiles.length;
+        showDiscover();
+    }
 
     private void likeProfile(Profile p) {
         new AlertDialog.Builder(this)
@@ -176,28 +183,96 @@ public class MainActivity extends Activity {
         clear();
         content.addView(Ui.text(this,"Vos meilleurs matchs",22,Ui.TEXT,true));
         TextView t = Ui.text(this,"Les profils ci-dessous dépassent 85 % de compatibilité IA.",14,Ui.MUTED,false);
-        Ui.padding(t,this,0,5,0,14); content.addView(t);
+        Ui.padding(t,this,0,5,0,14);
+        content.addView(t);
+
         for (int i=0;i<profiles.length;i++) {
             Profile p = profiles[i];
             if (p.score()<85) continue;
-            LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setBackground(Ui.rounded(Ui.SURFACE,18,this)); Ui.padding(row,this,14,14,14,14);
-            TextView av = Ui.text(this,p.name.substring(0,1),22,Ui.TEXT,true); av.setGravity(Gravity.CENTER);
-            av.setBackground(Ui.rounded(Ui.VIOLET,30,this)); row.addView(av,new LinearLayout.LayoutParams(Ui.dp(this,56),Ui.dp(this,56)));
-            LinearLayout texts = new LinearLayout(this); texts.setOrientation(LinearLayout.VERTICAL); Ui.padding(texts,this,12,0,0,0);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setBackground(Ui.rounded(Ui.SURFACE,18,this));
+            Ui.padding(row,this,14,14,14,14);
+
+            TextView av = Ui.text(this,p.name.substring(0,1),22,Ui.TEXT,true);
+            av.setGravity(Gravity.CENTER);
+            av.setBackground(Ui.rounded(Ui.VIOLET,30,this));
+            row.addView(av,new LinearLayout.LayoutParams(Ui.dp(this,56),Ui.dp(this,56)));
+
+            LinearLayout texts = new LinearLayout(this);
+            texts.setOrientation(LinearLayout.VERTICAL);
+            Ui.padding(texts,this,12,0,0,0);
             texts.addView(Ui.text(this,p.name+", "+p.age,17,Ui.TEXT,true));
             texts.addView(Ui.text(this,p.score()+"% · "+p.city,13,Ui.MINT,false));
             row.addView(texts,new LinearLayout.LayoutParams(0,-2,1));
-            final int pos=i; row.setOnClickListener(v->{ Intent in=new Intent(this,CompatibilityActivity.class); in.putExtra("idx",pos); startActivity(in);});
-            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1,-2); rp.bottomMargin=Ui.dp(this,10); content.addView(row,rp);
+
+            final int pos=i;
+            row.setOnClickListener(v->{
+                Intent in=new Intent(this,CompatibilityActivity.class);
+                in.putExtra("idx",pos);
+                startActivity(in);
+            });
+
+            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1,-2);
+            rp.bottomMargin=Ui.dp(this,10);
+            content.addView(row,rp);
         }
     }
 
     private void showProfile() {
         clear();
-        content.addView(Ui.text(this,"Votre profil IA",22,Ui.TEXT,true));
-        TextView intro=Ui.text(this,"Harmonia apprend vos préférences progressivement. Vous restez maître des critères utilisés.",14,Ui.MUTED,false);
-        Ui.padding(intro,this,0,6,0,18); content.addView(intro);
+
+        SharedPreferences prefs=getSharedPreferences("harmonia",MODE_PRIVATE);
+        String name=PhotoUriState.clean(prefs.getString("name",""));
+        String photoUri=PhotoUriState.clean(prefs.getString("profile_photo_uri",""));
+
+        content.addView(Ui.text(this,"Votre profil",22,Ui.TEXT,true));
+
+        TextView intro=Ui.text(this,"Ajoutez une photo claire de vous. Vous pourrez la remplacer à tout moment.",14,Ui.MUTED,false);
+        Ui.padding(intro,this,0,6,0,16);
+        content.addView(intro);
+
+        ImageView photo=new ImageView(this);
+        photo.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        photo.setBackground(Ui.rounded(Ui.SURFACE2,24,this));
+        photo.setClipToOutline(true);
+
+        if (PhotoUriState.hasPhoto(photoUri)) {
+            try {
+                photo.setImageURI(Uri.parse(photoUri));
+            } catch (Exception ignored) {
+                photo.setImageResource(android.R.drawable.ic_menu_camera);
+            }
+        } else {
+            photo.setImageResource(android.R.drawable.ic_menu_camera);
+        }
+        content.addView(photo,new LinearLayout.LayoutParams(-1,Ui.dp(this,280)));
+
+        if (PhotoUriState.hasPhoto(name)) {
+            TextView displayName=Ui.text(this,name,20,Ui.TEXT,true);
+            displayName.setGravity(Gravity.CENTER_HORIZONTAL);
+            Ui.padding(displayName,this,0,12,0,0);
+            content.addView(displayName);
+        }
+
+        Button changePhoto=new Button(this);
+        changePhoto.setText(PhotoUriState.hasPhoto(photoUri) ? "Changer ma photo" : "Ajouter une photo");
+        changePhoto.setAllCaps(false);
+        changePhoto.setTextSize(15);
+        changePhoto.setTextColor(Ui.TEXT);
+        changePhoto.setBackground(Ui.rounded(Ui.PINK,18,this));
+        changePhoto.setOnClickListener(v->openPhotoPicker());
+
+        LinearLayout.LayoutParams buttonLp=new LinearLayout.LayoutParams(-1,Ui.dp(this,54));
+        buttonLp.topMargin=Ui.dp(this,12);
+        buttonLp.bottomMargin=Ui.dp(this,18);
+        content.addView(changePhoto,buttonLp);
+
+        TextView aiTitle=Ui.text(this,"Profil IA",19,Ui.TEXT,true);
+        Ui.padding(aiTitle,this,0,2,0,10);
+        content.addView(aiTitle);
+
         infoCard("Préférences visuelles", "Actives · personnalisées à partir de vos likes et passes");
         infoCard("Relation recherchée", "Sérieuse");
         infoCard("Distance maximale", "50 km");
@@ -205,10 +280,42 @@ public class MainActivity extends Activity {
         infoCard("Données sensibles", "Non analysées : origine, santé, religion et autres attributs sensibles");
     }
 
+    private void openPhotoPicker() {
+        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(intent,PHOTO_REQUEST);
+    }
+
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
+        super.onActivityResult(requestCode,resultCode,data);
+        if (requestCode!=PHOTO_REQUEST || resultCode!=RESULT_OK || data==null || data.getData()==null) return;
+
+        Uri uri=data.getData();
+        int flags=data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
+        try {
+            getContentResolver().takePersistableUriPermission(uri,flags);
+        } catch (SecurityException ignored) {}
+
+        String saved=PhotoUriState.clean(uri.toString());
+        getSharedPreferences("harmonia",MODE_PRIVATE).edit().putString("profile_photo_uri",saved).apply();
+        showProfile();
+    }
+
     private void infoCard(String title,String text) {
-        LinearLayout c=new LinearLayout(this); c.setOrientation(LinearLayout.VERTICAL); c.setBackground(Ui.rounded(Ui.SURFACE,18,this)); Ui.padding(c,this,15,13,15,13);
+        LinearLayout c=new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setBackground(Ui.rounded(Ui.SURFACE,18,this));
+        Ui.padding(c,this,15,13,15,13);
         c.addView(Ui.text(this,title,15,Ui.TEXT,true));
-        TextView v=Ui.text(this,text,13,Ui.MUTED,false); Ui.padding(v,this,0,4,0,0); c.addView(v);
-        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=Ui.dp(this,10); content.addView(c,lp);
+
+        TextView v=Ui.text(this,text,13,Ui.MUTED,false);
+        Ui.padding(v,this,0,4,0,0);
+        c.addView(v);
+
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+        lp.bottomMargin=Ui.dp(this,10);
+        content.addView(c,lp);
     }
 }
