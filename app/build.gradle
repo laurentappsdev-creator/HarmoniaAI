@@ -4,11 +4,11 @@ android {
     compileSdkVersion 30
 
     defaultConfig {
-        applicationId "com.harmonia.ai.realai.v1"
+        applicationId "com.harmonia.ai.gemini.v1"
         minSdkVersion 23
         targetSdkVersion 30
-        versionCode 7
-        versionName "0.2.0-real-ai"
+        versionCode 8
+        versionName "0.2.1-gemini"
     }
 
     buildTypes {
