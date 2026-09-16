@@ -40,6 +40,15 @@ jobs:
         with:
           gradle-version: '6.7.1'
 
+      - name: Normalize generated Java imports
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("app/src/main/java/com/harmonia/ai/ChatActivity.java")
+          s = p.read_text()
+          p.write_text(s.replace("\\nimport", "\nimport"))
+          PY
+
       - name: Run unit tests
         run: gradle --no-daemon :app:testDebugUnitTest
 
