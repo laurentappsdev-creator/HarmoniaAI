@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -43,9 +46,19 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Upload APK
+      - name: Prepare named APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk HarmoniaAI_LangueAuto.apk
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: HarmoniaAI-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: HarmoniaAI_LangueAuto.apk
           if-no-files-found: error
+
+      - name: Publish direct-download release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete langue-auto-v1 -y --cleanup-tag || true
+          gh release create langue-auto-v1 HarmoniaAI_LangueAuto.apk             --title "HarmoniaAI LangueAuto"             --notes "Version avec détection automatique de la langue parlée."
