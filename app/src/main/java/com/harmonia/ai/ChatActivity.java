@@ -2,7 +2,7 @@ package com.harmonia.ai;
 
 import android.Manifest;
 import android.app.Activity;
-import android.content.Intent;
+import android.content.Intent;\nimport android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.Handler;
@@ -10,12 +10,12 @@ import android.os.Looper;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
-import android.speech.tts.TextToSpeech;
-import android.view.Gravity;
+import android.speech.tts.TextToSpeech;\nimport android.speech.tts.Voice;
+import android.view.Gravity;\nimport android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
+import android.widget.ScrollView;\nimport android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -30,7 +30,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Locale;
+import java.util.Locale;\nimport java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -58,6 +58,11 @@ public class ChatActivity extends Activity {
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
+        voicePrefs=getSharedPreferences("harmonia_voice",MODE_PRIVATE);
+        VoiceSettings.Preset sensual=VoiceSettings.sensual();
+        voiceVolume=voicePrefs.getFloat("volume",sensual.volume);
+        voiceRate=voicePrefs.getFloat("rate",sensual.rate);
+        voicePitch=voicePrefs.getFloat("pitch",sensual.pitch);
         initTextToSpeech();
         build();
         initSpeechRecognizer();
@@ -69,7 +74,8 @@ public class ChatActivity extends Activity {
                 int result = tts.setLanguage(Locale.getDefault());
                 ttsReady = result != TextToSpeech.LANG_MISSING_DATA
                         && result != TextToSpeech.LANG_NOT_SUPPORTED;
-                tts.setSpeechRate(0.95f);
+                chooseBestVoice(Locale.getDefault());
+                applyVoiceSettings();
             }
         });
     }
@@ -98,6 +104,26 @@ public class ChatActivity extends Activity {
         languageStatus=Ui.text(this,"Langue : détection automatique",12,Ui.MINT,true);
         Ui.padding(languageStatus,this,0,7,0,0);
         head.addView(languageStatus);
+
+        Button voiceControls=new Button(this);
+        voiceControls.setText("🎚  Voix et volume");
+        voiceControls.setAllCaps(false);
+        voiceControls.setTextColor(Ui.TEXT);
+        voiceControls.setTextSize(13);
+        voiceControls.setBackground(Ui.rounded(Ui.SURFACE2,16,this));
+        LinearLayout.LayoutParams voiceButtonLp=new LinearLayout.LayoutParams(-1,Ui.dp(this,46));
+        voiceButtonLp.topMargin=Ui.dp(this,10);
+        head.addView(voiceControls,voiceButtonLp);
+
+        voicePanel=createVoicePanel();
+        voicePanel.setVisibility(View.GONE);
+        LinearLayout.LayoutParams voicePanelLp=new LinearLayout.LayoutParams(-1,-2);
+        voicePanelLp.topMargin=Ui.dp(this,8);
+        head.addView(voicePanel,voicePanelLp);
+
+        voiceControls.setOnClickListener(v ->
+                voicePanel.setVisibility(voicePanel.getVisibility()==View.VISIBLE ? View.GONE : View.VISIBLE));
+
         root.addView(head);
 
         scroll=new ScrollView(this);
@@ -371,9 +397,170 @@ public class ChatActivity extends Activity {
         Locale spokenLocale=Locale.forLanguageTag(detectedLanguageTag);
         int result=tts.setLanguage(spokenLocale);
         if (result==TextToSpeech.LANG_MISSING_DATA || result==TextToSpeech.LANG_NOT_SUPPORTED) {
-            tts.setLanguage(Locale.getDefault());
+            spokenLocale=Locale.getDefault();
+            tts.setLanguage(spokenLocale);
         }
-        tts.speak(text,TextToSpeech.QUEUE_FLUSH,null,"harmonia_reply");
+
+        chooseBestVoice(spokenLocale);
+        applyVoiceSettings();
+
+        Bundle params=new Bundle();
+        params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME,VoiceSettings.clampVolume(voiceVolume));
+        tts.speak(text,TextToSpeech.QUEUE_FLUSH,params,"harmonia_reply");
+    }
+
+    private LinearLayout createVoicePanel() {
+        LinearLayout panel=new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackground(Ui.rounded(Ui.SURFACE,18,this));
+        Ui.padding(panel,this,14,12,14,12);
+
+        panel.addView(Ui.text(this,"Style de voix",13,Ui.TEXT,true));
+
+        LinearLayout presets=new LinearLayout(this);
+        presets.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams presetsLp=new LinearLayout.LayoutParams(-1,-2);
+        presetsLp.topMargin=Ui.dp(this,7);
+        panel.addView(presets,presetsLp);
+
+        addPresetButton(presets,"Naturelle",VoiceSettings.natural());
+        addPresetButton(presets,"Douce",VoiceSettings.soft());
+        addPresetButton(presets,"Sensuelle",VoiceSettings.sensual());
+
+        voiceValues=Ui.text(this,"",12,Ui.MUTED,false);
+        Ui.padding(voiceValues,this,0,10,0,2);
+        panel.addView(voiceValues);
+
+        panel.addView(Ui.text(this,"Volume",12,Ui.TEXT,true));
+        volumeSeek=new SeekBar(this);
+        volumeSeek.setMax(100);
+        volumeSeek.setProgress(VoiceSettings.volumeToProgress(voiceVolume));
+        panel.addView(volumeSeek,new LinearLayout.LayoutParams(-1,Ui.dp(this,38)));
+
+        panel.addView(Ui.text(this,"Vitesse",12,Ui.TEXT,true));
+        rateSeek=new SeekBar(this);
+        rateSeek.setMax(100);
+        rateSeek.setProgress(VoiceSettings.rateToProgress(voiceRate));
+        panel.addView(rateSeek,new LinearLayout.LayoutParams(-1,Ui.dp(this,38)));
+
+        panel.addView(Ui.text(this,"Ton",12,Ui.TEXT,true));
+        pitchSeek=new SeekBar(this);
+        pitchSeek.setMax(100);
+        pitchSeek.setProgress(VoiceSettings.pitchToProgress(voicePitch));
+        panel.addView(pitchSeek,new LinearLayout.LayoutParams(-1,Ui.dp(this,38)));
+
+        SeekBar.OnSeekBarChangeListener listener=new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar,int progress,boolean fromUser) {
+                if (volumeSeek==null || rateSeek==null || pitchSeek==null) return;
+                voiceVolume=VoiceSettings.progressToVolume(volumeSeek.getProgress());
+                voiceRate=VoiceSettings.progressToRate(rateSeek.getProgress());
+                voicePitch=VoiceSettings.progressToPitch(pitchSeek.getProgress());
+                applyVoiceSettings();
+                updateVoiceValues();
+                if (fromUser) saveVoiceSettings();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        };
+
+        volumeSeek.setOnSeekBarChangeListener(listener);
+        rateSeek.setOnSeekBarChangeListener(listener);
+        pitchSeek.setOnSeekBarChangeListener(listener);
+
+        Button preview=new Button(this);
+        preview.setText("▶  Tester la voix");
+        preview.setAllCaps(false);
+        preview.setTextColor(Ui.TEXT);
+        preview.setBackground(Ui.rounded(Ui.VIOLET,14,this));
+        preview.setOnClickListener(v ->
+                speak("Bonjour, je suis Harmonia. Vous pouvez régler ma voix exactement comme vous le souhaitez."));
+        LinearLayout.LayoutParams previewLp=new LinearLayout.LayoutParams(-1,Ui.dp(this,44));
+        previewLp.topMargin=Ui.dp(this,8);
+        panel.addView(preview,previewLp);
+
+        updateVoiceValues();
+        return panel;
+    }
+
+    private void addPresetButton(LinearLayout row,String label,VoiceSettings.Preset preset) {
+        Button button=new Button(this);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextSize(11);
+        button.setTextColor(Ui.TEXT);
+        button.setBackground(Ui.rounded(Ui.SURFACE2,14,this));
+        button.setOnClickListener(v->applyPreset(preset));
+
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,Ui.dp(this,42),1f);
+        lp.rightMargin=Ui.dp(this,5);
+        row.addView(button,lp);
+    }
+
+    private void applyPreset(VoiceSettings.Preset preset) {
+        voiceVolume=preset.volume;
+        voiceRate=preset.rate;
+        voicePitch=preset.pitch;
+
+        if (volumeSeek!=null) volumeSeek.setProgress(VoiceSettings.volumeToProgress(voiceVolume));
+        if (rateSeek!=null) rateSeek.setProgress(VoiceSettings.rateToProgress(voiceRate));
+        if (pitchSeek!=null) pitchSeek.setProgress(VoiceSettings.pitchToProgress(voicePitch));
+
+        applyVoiceSettings();
+        updateVoiceValues();
+        saveVoiceSettings();
+    }
+
+    private void applyVoiceSettings() {
+        if (tts==null) return;
+        tts.setSpeechRate(VoiceSettings.clampRate(voiceRate));
+        tts.setPitch(VoiceSettings.clampPitch(voicePitch));
+    }
+
+    private void saveVoiceSettings() {
+        if (voicePrefs==null) return;
+        voicePrefs.edit()
+                .putFloat("volume",VoiceSettings.clampVolume(voiceVolume))
+                .putFloat("rate",VoiceSettings.clampRate(voiceRate))
+                .putFloat("pitch",VoiceSettings.clampPitch(voicePitch))
+                .apply();
+    }
+
+    private void updateVoiceValues() {
+        if (voiceValues==null) return;
+        voiceValues.setText(
+                "Volume " + Math.round(voiceVolume*100f) + "%  ·  Vitesse "
+                        + String.format(Locale.ROOT,"%.2fx",voiceRate)
+                        + "  ·  Ton " + String.format(Locale.ROOT,"%.2fx",voicePitch));
+    }
+
+    private void chooseBestVoice(Locale locale) {
+        if (tts==null || locale==null) return;
+        try {
+            Set<Voice> voices=tts.getVoices();
+            if (voices==null || voices.isEmpty()) return;
+
+            Voice best=null;
+            int bestScore=Integer.MIN_VALUE;
+            String language=locale.getLanguage();
+
+            for (Voice voice : voices) {
+                if (voice==null || voice.getLocale()==null) continue;
+                if (!language.equalsIgnoreCase(voice.getLocale().getLanguage())) continue;
+
+                int score=voice.getQuality()*10-voice.getLatency();
+                String name=voice.getName()==null?"":voice.getName().toLowerCase(Locale.ROOT);
+                if (name.contains("natural") || name.contains("neural")) score+=1500;
+                if (name.contains("female") || name.contains("woman") || name.contains("femme")) score+=700;
+                if (voice.isNetworkConnectionRequired()) score+=100;
+
+                if (score>bestScore) {
+                    bestScore=score;
+                    best=voice;
+                }
+            }
+
+            if (best!=null) tts.setVoice(best);
+        } catch(Exception ignored) {}
     }
 
     private TextView addBubble(String text,boolean mine) {
