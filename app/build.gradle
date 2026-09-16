@@ -4,11 +4,11 @@ android {
     compileSdkVersion 30
 
     defaultConfig {
-        applicationId "com.harmonia.ai.gemini.v1"
+        applicationId "com.harmonia.ai.voicecontrol.v1"
         minSdkVersion 23
         targetSdkVersion 30
-        versionCode 8
-        versionName "0.2.1-gemini"
+        versionCode 9
+        versionName "0.3.0-voice-control"
     }
 
     buildTypes {
