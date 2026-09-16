@@ -1,0 +1,63 @@
+name: Diagnose HarmoniaAI Launch
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17 for SDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK 30
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-30" "build-tools;30.0.3"
+
+      - name: Java 11 for Gradle
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '6.7.1'
+
+      - name: Build APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Inspect APK manifest
+        run: |
+          "$ANDROID_HOME/build-tools/30.0.3/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/30.0.3/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Boot emulator and launch app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -W -n com.harmonia.ai/.MainActivity
+            sleep 3
+            echo "===== TOP ACTIVITY ====="
+            adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" || true
+            echo "===== CRASH LOGS ====="
+            adb logcat -d -b crash || true
+            echo "===== HARMONIA LOGS ====="
+            adb logcat -d | grep -i -E "harmonia|AndroidRuntime|FATAL EXCEPTION" | tail -n 200 || true
