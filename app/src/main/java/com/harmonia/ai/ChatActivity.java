@@ -1,10 +1,13 @@
 package com.harmonia.ai;
 
+import android.Manifest;
 import android.app.Activity;
-import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
 import android.widget.Button;
@@ -18,24 +21,28 @@ import java.util.ArrayList;
 import java.util.Locale;
 
 public class ChatActivity extends Activity {
-    private static final int SPEECH_REQUEST = 3001;
+    private static final int AUDIO_PERMISSION_REQUEST = 3002;
 
     private LinearLayout messages;
     private ScrollView scroll;
     private EditText input;
+    private TextView languageStatus;
     private TextToSpeech tts;
+    private SpeechRecognizer speechRecognizer;
     private boolean ttsReady = false;
+    private String detectedLanguageTag = Locale.getDefault().toLanguageTag();
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         initTextToSpeech();
         build();
+        initSpeechRecognizer();
     }
 
     private void initTextToSpeech() {
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
-                int result = tts.setLanguage(Locale.FRENCH);
+                int result = tts.setLanguage(Locale.getDefault());
                 ttsReady = result != TextToSpeech.LANG_MISSING_DATA
                         && result != TextToSpeech.LANG_NOT_SUPPORTED;
                 tts.setSpeechRate(0.95f);
@@ -61,8 +68,12 @@ public class ChatActivity extends Activity {
         head.addView(title);
 
         head.addView(Ui.text(this,
-                "Écrivez ou touchez le micro pour parler à Harmonia.",
+                "Parlez naturellement : Harmonia détecte automatiquement la langue quand le moteur vocal du téléphone le permet.",
                 12,Ui.MUTED,false));
+
+        languageStatus=Ui.text(this,"Langue : détection automatique",12,Ui.MINT,true);
+        Ui.padding(languageStatus,this,0,7,0,0);
+        head.addView(languageStatus);
         root.addView(head);
 
         scroll=new ScrollView(this);
@@ -72,8 +83,7 @@ public class ChatActivity extends Activity {
         scroll.addView(messages);
         root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
 
-        addBubble("J’ai trouvé 4 profils très compatibles aujourd’hui. Emma partage plusieurs de vos centres d’intérêt et votre score de compatibilité atteint 91 %.",false);
-        addBubble("Vous pouvez maintenant me parler : touchez 🎙, dites votre question et je vous répondrai à voix haute.",false);
+        addBubble("Touchez 🎙 puis parlez dans la langue de votre choix.",false);
 
         LinearLayout composer=new LinearLayout(this);
         composer.setGravity(Gravity.CENTER_VERTICAL);
@@ -111,37 +121,105 @@ public class ChatActivity extends Activity {
         setContentView(root);
     }
 
-    private void startVoiceRecognition() {
-        Intent intent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE,Locale.FRENCH.toLanguageTag());
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,Locale.FRENCH.toLanguageTag());
-        intent.putExtra(RecognizerIntent.EXTRA_PROMPT,"Parlez à Harmonia");
-        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
-
-        try {
-            startActivityForResult(intent,SPEECH_REQUEST);
-        } catch (ActivityNotFoundException e) {
-            Toast.makeText(this,
-                    "La reconnaissance vocale n’est pas disponible sur ce téléphone.",
-                    Toast.LENGTH_LONG).show();
+    private void initSpeechRecognizer() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            languageStatus.setText("Reconnaissance vocale indisponible");
+            return;
         }
+
+        speechRecognizer=SpeechRecognizer.createSpeechRecognizer(this);
+        speechRecognizer.setRecognitionListener(new RecognitionListener() {
+            @Override public void onReadyForSpeech(Bundle params) {
+                languageStatus.setText("Écoute… langue automatique");
+            }
+
+            @Override public void onBeginningOfSpeech() {
+                languageStatus.setText("Parlez…");
+            }
+
+            @Override public void onRmsChanged(float rmsdB) {}
+
+            @Override public void onBufferReceived(byte[] buffer) {}
+
+            @Override public void onEndOfSpeech() {
+                languageStatus.setText("Analyse de la langue…");
+            }
+
+            @Override public void onError(int error) {
+                languageStatus.setText("Langue : détection automatique");
+                if (error != SpeechRecognizer.ERROR_NO_MATCH
+                        && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    Toast.makeText(ChatActivity.this,
+                            "Je n’ai pas pu comprendre. Réessayez.",
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+
+            @Override public void onResults(Bundle results) {
+                ArrayList<String> spoken=results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                if (spoken==null || spoken.isEmpty()) return;
+
+                String transcript=VoiceConversation.clean(spoken.get(0));
+                if (!VoiceConversation.hasText(transcript)) return;
+
+                input.setText(transcript);
+                input.setSelection(input.length());
+                sendMessage(transcript,true);
+            }
+
+            @Override public void onPartialResults(Bundle partialResults) {}
+
+            @Override public void onEvent(int eventType, Bundle params) {}
+
+            public void onLanguageDetection(Bundle results) {
+                if (results==null) return;
+                String tag=results.getString("detected_language");
+                if (!VoiceConversation.hasText(tag)) return;
+
+                detectedLanguageTag=tag;
+                Locale locale=Locale.forLanguageTag(tag);
+                String name=locale.getDisplayLanguage(locale);
+                if (!VoiceConversation.hasText(name)) name=tag;
+                languageStatus.setText("Langue détectée : " + name);
+            }
+        });
     }
 
-    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
-        super.onActivityResult(requestCode,resultCode,data);
+    private void startVoiceRecognition() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},AUDIO_PERMISSION_REQUEST);
+            return;
+        }
+        beginListening();
+    }
 
-        if (requestCode!=SPEECH_REQUEST || resultCode!=RESULT_OK || data==null) return;
+    private void beginListening() {
+        if (speechRecognizer==null) {
+            Toast.makeText(this,"Reconnaissance vocale indisponible.",Toast.LENGTH_SHORT).show();
+            return;
+        }
 
-        ArrayList<String> results=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-        if (results==null || results.isEmpty()) return;
+        Intent intent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
 
-        String transcript=VoiceConversation.clean(results.get(0));
-        if (!VoiceConversation.hasText(transcript)) return;
+        // API 34+ : activation par clés littérales pour rester compilable avec l'ancien SDK du projet.
+        intent.putExtra("android.speech.extra.ENABLE_LANGUAGE_DETECTION",true);
+        intent.putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH","balanced");
 
-        input.setText(transcript);
-        input.setSelection(input.length());
-        sendMessage(transcript,true);
+        languageStatus.setText("Écoute… langue automatique");
+        speechRecognizer.startListening(intent);
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode,permissions,grantResults);
+        if (requestCode==AUDIO_PERMISSION_REQUEST
+                && grantResults.length>0
+                && grantResults[0]==PackageManager.PERMISSION_GRANTED) {
+            beginListening();
+        } else if (requestCode==AUDIO_PERMISSION_REQUEST) {
+            Toast.makeText(this,"Autorisez le microphone pour parler à Harmonia.",Toast.LENGTH_LONG).show();
+        }
     }
 
     private void sendMessage(String raw, boolean fromVoice) {
@@ -151,9 +229,9 @@ public class ChatActivity extends Activity {
         addBubble(q,true);
         input.setText("");
 
-        String answer=reply(q);
+        String language=VoiceConversation.languageCode(detectedLanguageTag);
+        String answer=reply(q,language);
         addBubble(answer,false);
-
         scroll.post(()->scroll.fullScroll(ScrollView.FOCUS_DOWN));
 
         if (fromVoice) speak(answer);
@@ -161,7 +239,42 @@ public class ChatActivity extends Activity {
 
     private void speak(String text) {
         if (!ttsReady || tts==null || !VoiceConversation.hasText(text)) return;
+
+        Locale spokenLocale=Locale.forLanguageTag(detectedLanguageTag);
+        int result=tts.setLanguage(spokenLocale);
+        if (result==TextToSpeech.LANG_MISSING_DATA || result==TextToSpeech.LANG_NOT_SUPPORTED) {
+            tts.setLanguage(Locale.getDefault());
+        }
         tts.speak(text,TextToSpeech.QUEUE_FLUSH,null,"harmonia_reply");
+    }
+
+    private String reply(String q,String language) {
+        String l=q.toLowerCase(Locale.ROOT);
+
+        if ("en".equals(language)) {
+            if (l.contains("emma")) return "With Emma, your strongest points are personalized visual affinity, compatible intentions, and shared interests.";
+            return "I can help you filter profiles by distance, intentions, interests and compatibility. Tell me what you are looking for.";
+        }
+
+        if ("de".equals(language)) {
+            if (l.contains("emma")) return "Bei Emma sind eure stärksten Punkte die persönliche visuelle Affinität, passende Absichten und gemeinsame Interessen.";
+            return "Ich kann Profile nach Entfernung, Absichten, Interessen und Kompatibilität filtern. Sag mir einfach, wonach du suchst.";
+        }
+
+        if ("es".equals(language)) {
+            if (l.contains("emma")) return "Con Emma, los puntos más fuertes son la afinidad visual personalizada, las intenciones compatibles y los intereses comunes.";
+            return "Puedo ayudarte a filtrar perfiles por distancia, intenciones, intereses y compatibilidad. Dime qué estás buscando.";
+        }
+
+        if ("it".equals(language)) {
+            if (l.contains("emma")) return "Con Emma, i punti più forti sono l’affinità visiva personalizzata, le intenzioni compatibili e gli interessi comuni.";
+            return "Posso aiutarti a filtrare i profili per distanza, intenzioni, interessi e compatibilità. Dimmi cosa stai cercando.";
+        }
+
+        if(l.contains("emma"))
+            return "Avec Emma, les points les plus forts sont l’affinité visuelle personnalisée, les intentions compatibles et les centres d’intérêt communs.";
+
+        return "Je peux vous aider à filtrer les profils selon la distance, les intentions, les centres d’intérêt et la compatibilité. Dites-moi simplement ce que vous recherchez.";
     }
 
     private void addBubble(String text,boolean mine) {
@@ -178,28 +291,11 @@ public class ChatActivity extends Activity {
         messages.addView(b,lp);
     }
 
-    private String reply(String q) {
-        String l=q.toLowerCase(Locale.FRENCH);
-
-        if(l.contains("bonjour") || l.contains("salut"))
-            return "Bonjour. Je vous écoute. Que souhaitez-vous savoir sur vos affinités ou vos matchs ?";
-
-        if(l.contains("nature") || l.contains("30 km"))
-            return "Sarah semble la plus proche de ce filtre : 8 kilomètres, forte affinité de mode de vie et intérêt marqué pour la montagne. Lina est également pertinente à 21 kilomètres.";
-
-        if(l.contains("emma"))
-            return "Avec Emma, les points les plus forts sont l’affinité visuelle personnalisée, les intentions compatibles et les centres d’intérêt liés aux animaux et aux sorties.";
-
-        if(l.contains("message") || l.contains("parler"))
-            return "Vous pourriez partir d’un point commun visible sur son profil. Par exemple, lui demander quelle balade ou quel voyage l’a le plus marquée récemment.";
-
-        if(l.contains("qui") && l.contains("compatible"))
-            return "Parmi la sélection actuelle, Emma, Lina, Chloé et Sarah ont les meilleurs scores de compatibilité. Je peux vous expliquer les différences entre leurs profils.";
-
-        return "Je peux vous aider à filtrer les profils selon la distance, les intentions, les centres d’intérêt et la compatibilité. Dites-moi simplement ce que vous recherchez.";
-    }
-
     @Override protected void onDestroy() {
+        if (speechRecognizer!=null) {
+            speechRecognizer.cancel();
+            speechRecognizer.destroy();
+        }
         if (tts!=null) {
             tts.stop();
             tts.shutdown();
