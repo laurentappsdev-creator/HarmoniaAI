@@ -4,11 +4,11 @@ android {
     compileSdkVersion 30
 
     defaultConfig {
-        applicationId "com.harmonia.ai.fresh"
+        applicationId "com.harmonia.ai.photo.v2"
         minSdkVersion 23
         targetSdkVersion 30
-        versionCode 3
-        versionName "0.1.2-photo"
+        versionCode 4
+        versionName "0.1.3-photo-v2"
     }
 
     buildTypes {
