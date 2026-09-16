@@ -7,8 +7,8 @@ android {
         applicationId "com.harmonia.ai.fresh"
         minSdkVersion 23
         targetSdkVersion 30
-        versionCode 2
-        versionName "0.1.1-fresh"
+        versionCode 3
+        versionName "0.1.2-photo"
     }
 
     buildTypes {
@@ -22,4 +22,8 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
 }
