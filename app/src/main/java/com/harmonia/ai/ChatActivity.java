@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -17,20 +19,42 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class ChatActivity extends Activity {
     private static final int AUDIO_PERMISSION_REQUEST = 3002;
+    private static final String AI_ENDPOINT =
+            "https://yvjonczwlaxoxmkwneon.supabase.co/functions/v1/harmonia-chat";
+    private static final String SUPABASE_ANON_KEY =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2am9uY3p3bGF4b3hta3duZW9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1Mzk4NDYsImV4cCI6MjEwNTExNTg0Nn0.qkPofmY7pL8CHmrCqOeAX1UdSEO5UpYVOteb5XGH3kk";
 
     private LinearLayout messages;
     private ScrollView scroll;
     private EditText input;
+    private Button mic;
     private TextView languageStatus;
     private TextToSpeech tts;
     private SpeechRecognizer speechRecognizer;
     private boolean ttsReady = false;
+    private boolean requestInFlight = false;
     private String detectedLanguageTag = Locale.getDefault().toLanguageTag();
+
+    private final ConversationHistory history = new ConversationHistory(12);
+    private final ExecutorService networkExecutor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -68,7 +92,7 @@ public class ChatActivity extends Activity {
         head.addView(title);
 
         head.addView(Ui.text(this,
-                "Parlez naturellement : Harmonia détecte automatiquement la langue quand le moteur vocal du téléphone le permet.",
+                "Harmonia utilise maintenant une vraie IA conversationnelle et garde le contexte des derniers messages.",
                 12,Ui.MUTED,false));
 
         languageStatus=Ui.text(this,"Langue : détection automatique",12,Ui.MINT,true);
@@ -83,7 +107,7 @@ public class ChatActivity extends Activity {
         scroll.addView(messages);
         root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
 
-        addBubble("Touchez 🎙 puis parlez dans la langue de votre choix.",false);
+        addBubble("Touchez 🎙 ou écrivez votre message. Je garderai le fil de la conversation.",false);
 
         LinearLayout composer=new LinearLayout(this);
         composer.setGravity(Gravity.CENTER_VERTICAL);
@@ -98,7 +122,7 @@ public class ChatActivity extends Activity {
         Ui.padding(input,this,16,0,16,0);
         composer.addView(input,new LinearLayout.LayoutParams(0,Ui.dp(this,58),1));
 
-        Button mic=new Button(this);
+        mic=new Button(this);
         mic.setText("🎙");
         mic.setTextSize(22);
         mic.setAllCaps(false);
@@ -138,7 +162,6 @@ public class ChatActivity extends Activity {
             }
 
             @Override public void onRmsChanged(float rmsdB) {}
-
             @Override public void onBufferReceived(byte[] buffer) {}
 
             @Override public void onEndOfSpeech() {
@@ -168,7 +191,6 @@ public class ChatActivity extends Activity {
             }
 
             @Override public void onPartialResults(Bundle partialResults) {}
-
             @Override public void onEvent(int eventType, Bundle params) {}
 
             public void onLanguageDetection(Bundle results) {
@@ -186,6 +208,8 @@ public class ChatActivity extends Activity {
     }
 
     private void startVoiceRecognition() {
+        if (requestInFlight) return;
+
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},AUDIO_PERMISSION_REQUEST);
             return;
@@ -202,8 +226,6 @@ public class ChatActivity extends Activity {
         Intent intent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
-
-        // API 34+ : activation par clés littérales pour rester compilable avec l'ancien SDK du projet.
         intent.putExtra("android.speech.extra.ENABLE_LANGUAGE_DETECTION",true);
         intent.putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH","balanced");
 
@@ -224,17 +246,118 @@ public class ChatActivity extends Activity {
 
     private void sendMessage(String raw, boolean fromVoice) {
         String q=VoiceConversation.clean(raw);
-        if (!VoiceConversation.hasText(q)) return;
+        if (!VoiceConversation.hasText(q) || requestInFlight) return;
+
+        requestInFlight=true;
+        setComposerEnabled(false);
 
         addBubble(q,true);
+        history.add("user",q);
         input.setText("");
 
-        String language=VoiceConversation.languageCode(detectedLanguageTag);
-        String answer=reply(q,language);
-        addBubble(answer,false);
+        TextView thinking=addBubble("Harmonia réfléchit…",false);
         scroll.post(()->scroll.fullScroll(ScrollView.FOCUS_DOWN));
 
-        if (fromVoice) speak(answer);
+        networkExecutor.execute(() -> requestAiReply(fromVoice,thinking));
+    }
+
+    private void requestAiReply(boolean fromVoice,TextView thinking) {
+        String reply=null;
+        String error=null;
+
+        HttpURLConnection connection=null;
+        try {
+            JSONObject payload=new JSONObject();
+            payload.put("language",detectedLanguageTag);
+
+            JSONArray historyJson=new JSONArray();
+            for (ConversationHistory.Message item : history.all()) {
+                JSONObject message=new JSONObject();
+                message.put("role",item.role);
+                message.put("content",item.content);
+                historyJson.put(message);
+            }
+            payload.put("messages",historyJson);
+
+            URL url=new URL(AI_ENDPOINT);
+            connection=(HttpURLConnection)url.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(45000);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type","application/json; charset=utf-8");
+            connection.setRequestProperty("apikey",SUPABASE_ANON_KEY);
+            connection.setRequestProperty("Authorization","Bearer " + SUPABASE_ANON_KEY);
+
+            byte[] body=payload.toString().getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(body.length);
+            try(OutputStream out=connection.getOutputStream()) {
+                out.write(body);
+            }
+
+            int status=connection.getResponseCode();
+            InputStream stream=status>=200 && status<300
+                    ? connection.getInputStream()
+                    : connection.getErrorStream();
+            String response=readStream(stream);
+
+            if (status>=200 && status<300) {
+                JSONObject json=new JSONObject(response);
+                reply=VoiceConversation.clean(json.optString("reply",""));
+                if (!VoiceConversation.hasText(reply)) {
+                    error="Réponse IA vide.";
+                }
+            } else {
+                String serverError="";
+                try {
+                    serverError=new JSONObject(response).optString("error","");
+                } catch(Exception ignored) {}
+                if ("ai_not_configured".equals(serverError)) {
+                    error="Le serveur Harmonia est prêt, mais la clé OpenAI doit encore être activée dans Supabase.";
+                } else {
+                    error="Impossible de joindre l’IA pour le moment. Réessayez.";
+                }
+            }
+        } catch(Exception e) {
+            error="Connexion à l’IA impossible. Vérifiez votre connexion Internet puis réessayez.";
+        } finally {
+            if (connection!=null) connection.disconnect();
+        }
+
+        final String finalReply=reply;
+        final String finalError=error;
+
+        mainHandler.post(() -> {
+            messages.removeView(thinking);
+
+            if (VoiceConversation.hasText(finalReply)) {
+                history.add("assistant",finalReply);
+                addBubble(finalReply,false);
+                if (fromVoice) speak(finalReply);
+            } else {
+                addBubble(finalError==null?"Une erreur est survenue.":finalError,false);
+            }
+
+            requestInFlight=false;
+            setComposerEnabled(true);
+            scroll.post(()->scroll.fullScroll(ScrollView.FOCUS_DOWN));
+        });
+    }
+
+    private String readStream(InputStream stream) throws Exception {
+        if (stream==null) return "";
+        StringBuilder out=new StringBuilder();
+        try(BufferedReader reader=new BufferedReader(
+                new InputStreamReader(stream,StandardCharsets.UTF_8))) {
+            String line;
+            while((line=reader.readLine())!=null) out.append(line);
+        }
+        return out.toString();
+    }
+
+    private void setComposerEnabled(boolean enabled) {
+        input.setEnabled(enabled);
+        mic.setEnabled(enabled);
     }
 
     private void speak(String text) {
@@ -248,36 +371,7 @@ public class ChatActivity extends Activity {
         tts.speak(text,TextToSpeech.QUEUE_FLUSH,null,"harmonia_reply");
     }
 
-    private String reply(String q,String language) {
-        String l=q.toLowerCase(Locale.ROOT);
-
-        if ("en".equals(language)) {
-            if (l.contains("emma")) return "With Emma, your strongest points are personalized visual affinity, compatible intentions, and shared interests.";
-            return "I can help you filter profiles by distance, intentions, interests and compatibility. Tell me what you are looking for.";
-        }
-
-        if ("de".equals(language)) {
-            if (l.contains("emma")) return "Bei Emma sind eure stärksten Punkte die persönliche visuelle Affinität, passende Absichten und gemeinsame Interessen.";
-            return "Ich kann Profile nach Entfernung, Absichten, Interessen und Kompatibilität filtern. Sag mir einfach, wonach du suchst.";
-        }
-
-        if ("es".equals(language)) {
-            if (l.contains("emma")) return "Con Emma, los puntos más fuertes son la afinidad visual personalizada, las intenciones compatibles y los intereses comunes.";
-            return "Puedo ayudarte a filtrar perfiles por distancia, intenciones, intereses y compatibilidad. Dime qué estás buscando.";
-        }
-
-        if ("it".equals(language)) {
-            if (l.contains("emma")) return "Con Emma, i punti più forti sono l’affinità visiva personalizzata, le intenzioni compatibili e gli interessi comuni.";
-            return "Posso aiutarti a filtrare i profili per distanza, intenzioni, interessi e compatibilità. Dimmi cosa stai cercando.";
-        }
-
-        if(l.contains("emma"))
-            return "Avec Emma, les points les plus forts sont l’affinité visuelle personnalisée, les intentions compatibles et les centres d’intérêt communs.";
-
-        return "Je peux vous aider à filtrer les profils selon la distance, les intentions, les centres d’intérêt et la compatibilité. Dites-moi simplement ce que vous recherchez.";
-    }
-
-    private void addBubble(String text,boolean mine) {
+    private TextView addBubble(String text,boolean mine) {
         TextView b=Ui.text(this,text,14,Ui.TEXT,false);
         b.setLineSpacing(0,1.15f);
         Ui.padding(b,this,14,11,14,11);
@@ -289,9 +383,11 @@ public class ChatActivity extends Activity {
         lp.leftMargin=mine?Ui.dp(this,44):0;
         lp.rightMargin=mine?0:Ui.dp(this,44);
         messages.addView(b,lp);
+        return b;
     }
 
     @Override protected void onDestroy() {
+        networkExecutor.shutdownNow();
         if (speechRecognizer!=null) {
             speechRecognizer.cancel();
             speechRecognizer.destroy();
